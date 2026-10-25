@@ -304,12 +304,10 @@
     .toolbar { width: 50px; margin-left: 6px; padding: 4px; }
     .tool { width: 38px; height: 38px; }
     .stage { padding: 8px 5px; }
-    .stage.textbar-visible { align-items: flex-start; }
-    .stage.textbar-visible #pad { width: min(100cqw, max(80px, calc(100cqh - 72px))); }
-    .stage.textbar-with-copy #pad { width: min(100cqw, max(80px, calc(100cqh - 120px))); }
-    .textbar { top: auto; bottom: auto; max-width: calc(100vw - 68px); gap: 3px; padding-left: 8px; }
-    .textbar input { width: 32vw; }
-    .textbar select { max-width: 86px; }
+    .textbar { top: auto; bottom: auto; max-width: calc(100vw - 140px); gap: 3px; padding-left: 8px; }
+    .textbar input { width: min(22vw, 86px); min-width: 0; }
+    .textbar select { max-width: 52px; padding: 6px 14px 6px 7px; font-size: 12px; }
+    .textbar button { width: 28px; height: 28px; }
   }
 
   /* ---------- Short screens (phone in landscape) ---------- */
@@ -609,7 +607,6 @@ const canvas = $("pad");
 const ctx = canvas.getContext("2d");
 const toolbar = $("toolbar");
 const copySelectionBtn = $("copySelection");
-const appEl = document.querySelector(".app");
 const stageEl = document.querySelector(".stage");
 const bottomBar = document.querySelector(".bottombar");
 const popover = $("popover");
@@ -1017,10 +1014,7 @@ function syncSelectedTextPrompt() {
       if (document.activeElement !== textInput) textInput.value = item.text;
     }
   }
-  const visible = !textbar.hidden;
-  stageEl.classList.toggle("textbar-visible", visible);
-  stageEl.classList.toggle("textbar-with-copy", visible && !!item);
-  if (visible) positionTextbarForViewport();
+  if (!textbar.hidden) positionTextbarForViewport();
 }
 
 function copySelection() {
@@ -1382,10 +1376,11 @@ function positionCopyButton() {
   const cr = canvas.getBoundingClientRect();
   const width = copySelectionBtn.offsetWidth || 76, height = copySelectionBtn.offsetHeight || 42;
   const left = clamp(cr.right - width, 4, Math.max(4, window.innerWidth - width - 4));
-  const mobilePromptOffset = window.matchMedia("(max-width: 560px)").matches && !textbar.hidden
-    ? textbar.offsetHeight + 6
-    : 0;
-  const top = cr.bottom + 8 + mobilePromptOffset;
+  let top = cr.bottom + 8;
+  if (window.matchMedia("(max-width: 560px)").matches && !textbar.hidden) {
+    const promptLeft = Number.parseFloat(textbar.style.left) || cr.left;
+    if (promptLeft + textbar.offsetWidth + 8 > left) top += textbar.offsetHeight + 6;
+  }
   copySelectionBtn.style.left = left + "px";
   copySelectionBtn.style.top = top + "px";
 }
@@ -1710,30 +1705,25 @@ function positionTextbarForViewport() {
     textbar.style.top = "";
     textbar.style.bottom = "";
     textbar.style.left = "";
+    textbar.style.maxWidth = "";
     textbar.style.transform = "";
     return;
   }
   if (textbar.hidden) return;
   const cr = canvas.getBoundingClientRect();
   const sr = stageEl.getBoundingClientRect();
+  const copyReserve = copySelectionBtn.hidden ? 0 : (copySelectionBtn.offsetWidth || 76) + 8;
+  textbar.style.maxWidth = Math.max(132, Math.min(window.innerWidth - 68, cr.width - copyReserve)) + "px";
   const width = textbar.offsetWidth;
-  const minCenter = sr.left + width / 2;
-  const maxCenter = sr.right - width / 2;
-  const canvasCenter = cr.left + cr.width / 2;
-  const center = maxCenter >= minCenter ? clamp(canvasCenter, minCenter, maxCenter) : sr.left + sr.width / 2;
-  textbar.style.left = center + "px";
+  const minLeft = sr.left;
+  const maxLeft = Math.max(minLeft, sr.right - width);
+  textbar.style.left = clamp(cr.left, minLeft, maxLeft) + "px";
   textbar.style.bottom = "auto";
   textbar.style.top = cr.bottom + 8 + "px";
-  textbar.style.transform = "translateX(-50%)";
+  textbar.style.transform = "none";
 }
 
 function updateMobileViewport() {
-  const viewport = window.visualViewport;
-  if (window.matchMedia("(max-width: 560px)").matches && viewport) {
-    appEl.style.height = Math.max(1, viewport.height) + "px";
-  } else {
-    appEl.style.height = "";
-  }
   requestAnimationFrame(() => {
     positionTextbarForViewport();
     if (!copySelectionBtn.hidden) positionCopyButton();
