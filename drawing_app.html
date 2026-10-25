@@ -303,7 +303,7 @@
     .toolbar { width: 50px; margin-left: 6px; padding: 4px; }
     .tool { width: 38px; height: 38px; }
     .stage { padding: 8px 5px; }
-    .textbar { gap: 3px; padding-left: 8px; }
+    .textbar { top: auto; bottom: calc(env(safe-area-inset-bottom) + 8px); gap: 3px; padding-left: 8px; }
     .textbar input { width: 32vw; }
     .textbar select { max-width: 86px; }
   }
@@ -996,6 +996,22 @@ function setSelection(ids, frame) {
 }
 function clearSelection() { selection = { ids: [], frame: null }; }
 function selectionFrame() { return selection.frame || boundsFrame(selection.ids); }
+function selectedTextItem() {
+  if (selection.ids.length !== 1) return null;
+  return strokes.find((s) => s.gid === selection.ids[0] && (s.kind === "text" || s.kind === "textmirror")) || null;
+}
+function syncSelectedTextPrompt() {
+  if (draft) return;
+  const item = selectedTextItem();
+  if (!item) {
+    textbar.hidden = true;
+    return;
+  }
+  textbar.hidden = false;
+  fontSelect.value = item.font;
+  if (document.activeElement !== textInput) textInput.value = item.text;
+  positionTextbarForViewport();
+}
 
 function copySelection() {
   if (!selection.ids.length) return false;
@@ -1079,6 +1095,19 @@ function groupAt(p) {
     }
     const area = Math.max(0.01, f.w) * Math.max(0.01, f.h);
     if (hit && area < bestArea) { best = s.gid; bestArea = area; }
+  }
+  return best;
+}
+
+function textAt(p) {
+  let best = null, bestArea = Infinity;
+  for (let i = strokes.length - 1; i >= 0; i--) {
+    const s = strokes[i], f = s.frame;
+    if ((s.kind !== "text" && s.kind !== "textmirror") || !f) continue;
+    const l = toLocal({ x: f.cx, y: f.cy }, f.angle || 0, p);
+    if (Math.abs(l.x) > f.w / 2 + 3 || Math.abs(l.y) > f.h / 2 + 3) continue;
+    const area = Math.max(0.01, f.w) * Math.max(0.01, f.h);
+    if (area < bestArea) { best = s; bestArea = area; }
   }
   return best;
 }
@@ -1336,6 +1365,7 @@ function redraw() {
   if (mirrorEnabled) drawMirrorAxis(scale);
   copySelectionBtn.hidden = !selection.ids.length || !!draft;
   if (!copySelectionBtn.hidden) positionCopyButton();
+  syncSelectedTextPrompt();
 }
 
 function positionCopyButton() {
@@ -1437,6 +1467,7 @@ function beginSelect(p) {
   drag = {
     ids, indices, original: indices.map((i) => clone(strokes[i])), baseFrames,
     frame, center: { x: frame.cx, y: frame.cy }, start: p, moved: false, mode: "move",
+    hitId,
   };
 
   if (ids.length === 1 && frame.shapeKey === "line") {
@@ -1533,7 +1564,7 @@ canvas.addEventListener("pointerdown", (e) => {
     e.preventDefault();
     return;
   }
-  if (tool === "text") return;            // text is placed on click
+  if (tool === "text") return;            // text interaction is handled by click and double-click handlers
   commitText();                           // touching the canvas finishes any text being typed
   activePointer = e.pointerId;
   try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* synthetic events */ }
@@ -1632,10 +1663,8 @@ function endPointer(e) {
   } else if (tool === "select" && drag) {
     const t = drag;
     drag = null;
-    if (t.moved) commit();
-    else if (e.type === "pointerup" && t.ids.length === 1 && t.mode !== "cornerScale") {
-      const text = strokes.find((s) => s.gid === t.ids[0] && (s.kind === "text" || s.kind === "textmirror"));
-      if (text) startText(null, text);       // tapping a text opens it for editing
+    if (t.moved) {
+      commit();
     }
   }
   redraw();
@@ -1650,8 +1679,40 @@ canvas.addEventListener("pointerleave", () => {
 // Text tool
 // ============================================================
 canvas.addEventListener("click", (e) => {
-  if (tool === "text" && !submitting) startText(toMM(e));
+  if (tool !== "text" || submitting) return;
+  const p = toMM(e);
+  const hitId = groupAt(p);
+  const text = textAt(p) || strokes.find((s) => s.gid === hitId && (s.kind === "text" || s.kind === "textmirror"));
+  if (!text) {
+    startText(p);                       // place new text on an empty point
+    return;
+  }
+  setSelection([text.gid], groupFrame(text.gid));
+  redraw();
+  updateButtons();
 });
+
+function positionTextbarForViewport() {
+  if (!window.matchMedia("(max-width: 560px)").matches) {
+    textbar.style.top = "";
+    textbar.style.bottom = "";
+    return;
+  }
+  const viewport = window.visualViewport;
+  if (!viewport || textbar.hidden) {
+    textbar.style.top = "";
+    textbar.style.bottom = "";
+    return;
+  }
+  textbar.style.bottom = "auto";
+  textbar.style.top = Math.max(4, viewport.offsetTop + viewport.height - textbar.offsetHeight - 8) + "px";
+}
+
+window.addEventListener("resize", positionTextbarForViewport);
+if (window.visualViewport) {
+  window.visualViewport.addEventListener("resize", positionTextbarForViewport);
+  window.visualViewport.addEventListener("scroll", positionTextbarForViewport);
+}
 
 // Start typing at point p, or edit an existing text stroke
 function startText(p, existing) {
@@ -1673,10 +1734,18 @@ function startText(p, existing) {
   fontSelect.value = fontFamily;
   textInput.value = draft.text;
   textbar.hidden = false;
-  textInput.focus();
+  if (!existing) textInput.focus();
+  positionTextbarForViewport();
+  requestAnimationFrame(positionTextbarForViewport);
   redraw();
   updateButtons();
 }
+
+textInput.addEventListener("focus", () => {
+  if (draft) return;
+  const selectedText = selectedTextItem();
+  if (selectedText) startText(null, selectedText);
+});
 
 function closeDraft() {
   draft = null;
