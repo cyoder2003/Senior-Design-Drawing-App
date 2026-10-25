@@ -2,226 +2,1069 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>Plotter Drawing</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#f4f4f6">
+<title>Plotter Draw</title>
 <style>
-  * { box-sizing: border-box; }
+  :root {
+    --bg: #f4f4f6;
+    --surface: #ffffff;
+    --ink: #17171a;
+    --hover: #f0f0f3;
+    --accent: #3e63dd;
+    --shadow: 0 1px 2px rgba(16, 16, 24, 0.06), 0 10px 30px rgba(16, 16, 24, 0.10);
+    color-scheme: light;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body {
     margin: 0;
     height: 100%;
-    background: #f2f2f2;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    overflow: hidden;
     overscroll-behavior: none;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
   }
+
+  /* ---------- Layout ---------- */
   .app {
-    min-height: 100%;
+    height: 100vh;
+    height: 100dvh;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+  .stage {
+    grid-column: 2;
+    grid-row: 1;
+    container-type: size;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 12px;
+    min-width: 0;
+    min-height: 0;
+  }
+  #pad {
+    width: min(100cqw, 100cqh);
+    height: auto;
+    aspect-ratio: 1 / 1;
+    display: block;
+    background: #fff;
+    border-radius: 14px;
+    box-shadow: var(--shadow);
+    touch-action: none;
+    cursor: crosshair;
+  }
+  #pad[data-tool="text"] { cursor: text; }
+  #pad[data-tool="eraser"] { cursor: none; }
+
+  /* ---------- Toolbar ---------- */
+  .toolbar {
+    grid-column: 1;
+    grid-row: 1;
+    align-self: center;
+    margin: 12px 0 12px 12px;
+    padding: 8px;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 12px;
-    padding: 12px;
+    gap: 4px;
+    background: var(--surface);
+    border-radius: 22px;
+    box-shadow: var(--shadow);
   }
-  h1 { font-size: 1.1rem; margin: 4px 0 0; }
-  .hint { margin: 0; font-size: 0.85rem; color: #555; }
-  #pad {
-    width: min(100%, 560px);
-    aspect-ratio: 1 / 1;
-    background: #fff;
-    border: 2px solid #222;
-    border-radius: 4px;
-    touch-action: none;
-    user-select: none;
-    -webkit-user-select: none;
-    cursor: crosshair;
-    display: block;
+  .divider { width: 24px; height: 1px; background: rgba(0, 0, 0, 0.09); margin: 4px 0; }
+  .tool {
+    position: relative;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    border: 0;
+    border-radius: 12px;
+    background: transparent;
+    color: var(--ink);
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+    touch-action: manipulation;
   }
-  .row { display: flex; gap: 8px; width: min(100%, 560px); }
-  button {
-    flex: 1;
-    padding: 14px 8px;
-    font-size: 1rem;
-    border: 2px solid #222;
-    border-radius: 6px;
-    background: #fff;
-    color: #222;
+  .tool:hover { background: var(--hover); }
+  .tool.active { background: var(--ink); color: #fff; }
+  .tool:disabled { opacity: 0.3; cursor: default; background: transparent; }
+  .tool.has-menu::after {
+    content: "";
+    position: absolute;
+    right: 5px;
+    bottom: 5px;
+    border: 3px solid transparent;
+    border-right-color: currentColor;
+    border-bottom-color: currentColor;
+    opacity: 0.45;
   }
-  button:active:not(:disabled) { background: #e6e6e6; }
-  button:disabled { opacity: 0.4; }
-  #submit { background: #222; color: #fff; }
-  #submit:active:not(:disabled) { background: #444; }
-  #status { min-height: 1.4em; margin: 0; font-size: 0.95rem; text-align: center; }
-  #status.ok { color: #1a7f37; }
-  #status.err { color: #c62828; }
+  .dot {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    border: 2px solid #fff;
+    box-shadow: 0 0 0 1.5px rgba(0, 0, 0, 0.25);
+  }
+
+  /* ---------- Bottom bar ---------- */
+  .bottombar {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    display: flex;
+    justify-content: center;
+    padding: 4px 12px 16px;
+  }
+  #submit {
+    height: 52px;
+    min-width: min(260px, 80vw);
+    padding: 0 32px;
+    border: 0;
+    border-radius: 999px;
+    background: var(--ink);
+    color: #fff;
+    font-family: inherit;
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    box-shadow: var(--shadow);
+    cursor: pointer;
+    touch-action: manipulation;
+    transition: transform 0.08s ease, opacity 0.15s ease;
+  }
+  #submit:active:not(:disabled) { transform: scale(0.98); }
+  #submit:disabled { opacity: 0.3; cursor: default; }
+
+  /* ---------- Popover ---------- */
+  .popover {
+    position: fixed;
+    z-index: 20;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 8px;
+    background: var(--surface);
+    border-radius: 16px;
+    box-shadow: var(--shadow);
+  }
+  .popover[hidden] { display: none; }
+  .popover.shape { width: 192px; }
+  .popover.color { width: 192px; gap: 0; }
+  .opt {
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    border: 0;
+    border-radius: 12px;
+    background: transparent;
+    color: var(--ink);
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  .opt:hover { background: var(--hover); }
+  .opt.sel { background: var(--ink); color: #fff; }
+  .ring { display: block; border: 2px solid currentColor; border-radius: 50%; }
+  .swatch {
+    position: relative;
+    width: 36px;
+    height: 36px;
+    margin: 4px;
+    padding: 0;
+    border-radius: 50%;
+    border: 2px solid #fff;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.18);
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  .swatch.sel { box-shadow: 0 0 0 2.5px var(--ink); }
+  .swatch.custom { background: conic-gradient(#f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00); }
+  .swatch.custom input {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    padding: 0;
+    border: 0;
+    opacity: 0;
+    cursor: pointer;
+  }
+
+  /* ---------- Text entry ---------- */
+  .textbar {
+    position: fixed;
+    z-index: 30;
+    top: calc(env(safe-area-inset-top) + 10px);
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 6px 6px 16px;
+    background: var(--surface);
+    border-radius: 999px;
+    box-shadow: var(--shadow);
+  }
+  .textbar[hidden] { display: none; }
+  .textbar input {
+    width: min(52vw, 260px);
+    border: 0;
+    outline: 0;
+    background: transparent;
+    font-family: inherit;
+    font-size: 16px;
+    text-transform: uppercase;
+    color: var(--ink);
+    -webkit-user-select: text;
+    user-select: text;
+  }
+  .textbar button {
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+    background: var(--hover);
+    color: var(--ink);
+    touch-action: manipulation;
+  }
+  .textbar button.go { background: var(--ink); color: #fff; }
+
+  /* ---------- Toast ---------- */
+  .toast {
+    position: fixed;
+    z-index: 40;
+    left: 50%;
+    bottom: calc(env(safe-area-inset-bottom) + 84px);
+    transform: translate(-50%, 8px);
+    max-width: 90vw;
+    padding: 10px 18px;
+    border-radius: 999px;
+    background: var(--ink);
+    color: #fff;
+    font-size: 14px;
+    font-weight: 500;
+    box-shadow: var(--shadow);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease, transform 0.2s ease;
+  }
+  .toast.show { opacity: 1; transform: translate(-50%, 0); }
+  .toast.err { background: #b42318; }
+  .toast.ok { background: #1a7f37; }
+
+  /* ---------- Short screens (phone in landscape) ---------- */
+  @media (max-height: 480px) {
+    .toolbar { margin: 8px 0 8px 8px; padding: 6px; gap: 2px; }
+    .tool { width: 38px; height: 38px; }
+    .dot { width: 20px; height: 20px; }
+    .stage { padding: 8px; }
+    .bottombar { padding: 2px 12px 8px; }
+    #submit { height: 44px; }
+    .toast { bottom: calc(env(safe-area-inset-bottom) + 64px); }
+  }
 </style>
 </head>
 <body>
 <div class="app">
-  <h1>Draw something for the plotter</h1>
-  <p class="hint">Use one finger. The square is the drawing area.</p>
-  <canvas id="pad"></canvas>
-  <div class="row">
-    <button id="undo" disabled>Undo</button>
-    <button id="clear" disabled>Clear</button>
-    <button id="submit" disabled>Submit</button>
-  </div>
-  <p id="status"></p>
+  <aside class="toolbar" id="toolbar" aria-label="Tools">
+    <button class="tool" data-action="pencil" title="Pencil" aria-label="Pencil"></button>
+    <button class="tool has-menu" data-action="eraser" title="Eraser" aria-label="Eraser"></button>
+    <button class="tool has-menu" data-action="shape" title="Shapes" aria-label="Shapes"></button>
+    <button class="tool has-menu" data-action="text" title="Text" aria-label="Text"></button>
+    <div class="divider"></div>
+    <button class="tool has-menu" data-action="color" title="Color" aria-label="Color"><span class="dot" id="colorDot"></span></button>
+    <div class="divider"></div>
+    <button class="tool" data-action="undo" id="undo" title="Undo" aria-label="Undo" disabled></button>
+  </aside>
+
+  <main class="stage">
+    <canvas id="pad" data-tool="pencil"></canvas>
+  </main>
+
+  <footer class="bottombar">
+    <button id="submit" disabled>Submit design</button>
+  </footer>
 </div>
 
+<div class="popover" id="popover" hidden></div>
+
+<div class="textbar" id="textbar" hidden>
+  <input id="textInput" type="text" maxlength="60" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" enterkeyhint="done" placeholder="Type text" aria-label="Text to add">
+  <button type="button" id="textCancel" aria-label="Cancel text"></button>
+  <button type="button" id="textDone" class="go" aria-label="Add text"></button>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
 <script>
-// ---------------- Settings ----------------
+// ============================================================
+// Settings
+// ============================================================
 const SUPABASE_URL = "https://azgqtxtweqiagektvwmm.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_ADAbV7_ZrRidQ5XIWRBJjQ_PnNjQWfI";
 
-const BED_MM = 200;            // drawing area is BED_MM x BED_MM millimeters
-const MIN_POINT_SPACING = 0.3; // mm; skip points closer than this
-const MAX_SVG_CHARS = 200000;  // must match the limit in the database
+const BED_MM = 200;             // drawing area is BED_MM x BED_MM millimeters
+const MIN_POINT_SPACING = 0.3;  // mm; pencil skips points closer than this
+const MAX_SVG_CHARS = 200000;   // must match the limit in the database
 
-// ---------------- State ----------------
+const COLORS = ["#17171a", "#e5484d", "#f76b15", "#ffc53d", "#30a46c", "#3e63dd", "#8e4ec6", "#d6409f"];
+const ERASER_RADIUS = { s: 2, m: 4, l: 8 };   // mm
+const TEXT_HEIGHT = { s: 6, m: 10, l: 16 };   // mm, height of capital letters
+
+const SHAPE_KEYS = ["line", "rectangle", "ellipse", "triangle", "star", "star12", "heart"];
+const SHAPE_LABELS = {
+  line: "Line", rectangle: "Rectangle", ellipse: "Ellipse", triangle: "Triangle",
+  star: "Star", star12: "12-point star", heart: "Heart",
+};
+
+// ============================================================
+// Icons (24x24, stroke style)
+// ============================================================
+function svgIcon(inner) {
+  return '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" ' +
+    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + inner + "</svg>";
+}
+const ICONS = {
+  pencil: svgIcon('<path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/>'),
+  eraser: svgIcon('<path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m5 11 9 9"/>'),
+  text: svgIcon('<polyline points="4 7 4 4 20 4 20 7"/><line x1="9" x2="15" y1="20" y2="20"/><line x1="12" x2="12" y1="4" y2="20"/>'),
+  undo: svgIcon('<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"/>'),
+  check: svgIcon('<path d="M20 6 9 17l-5-5"/>'),
+  close: svgIcon('<path d="M18 6 6 18"/><path d="m6 6 12 12"/>'),
+};
+
+// ============================================================
+// Single-stroke font (capitals, digits, a few symbols)
+// Each entry: [width, [polyline, ...]] with polylines as flat x,y lists.
+// Grid: x runs 0..width, y runs 0 (top) to 6 (baseline).
+// ============================================================
+const FONT = {
+  "A": [4, [[0,6, 2,0, 4,6], [0.67,4, 3.33,4]]],
+  "B": [4, [[0,6, 0,0, 2.5,0, 3.5,0.6, 3.5,2.4, 2.5,3, 0,3], [2.5,3, 3.8,3.6, 3.8,5.4, 2.5,6, 0,6]]],
+  "C": [4, [[4,1, 3,0, 1,0, 0,1, 0,5, 1,6, 3,6, 4,5]]],
+  "D": [4, [[0,0, 0,6, 2,6, 4,4, 4,2, 2,0, 0,0]]],
+  "E": [4, [[4,0, 0,0, 0,6, 4,6], [0,3, 3,3]]],
+  "F": [4, [[4,0, 0,0, 0,6], [0,3, 3,3]]],
+  "G": [4, [[4,1, 3,0, 1,0, 0,1, 0,5, 1,6, 3,6, 4,5, 4,3, 2.2,3]]],
+  "H": [4, [[0,0, 0,6], [4,0, 4,6], [0,3, 4,3]]],
+  "I": [2, [[0,0, 2,0], [1,0, 1,6], [0,6, 2,6]]],
+  "J": [4, [[4,0, 4,5, 3,6, 1,6, 0,5]]],
+  "K": [4, [[0,0, 0,6], [4,0, 0,3.3, 4,6]]],
+  "L": [4, [[0,0, 0,6, 4,6]]],
+  "M": [4, [[0,6, 0,0, 2,3.5, 4,0, 4,6]]],
+  "N": [4, [[0,6, 0,0, 4,6, 4,0]]],
+  "O": [4, [[1,0, 3,0, 4,1, 4,5, 3,6, 1,6, 0,5, 0,1, 1,0]]],
+  "P": [4, [[0,6, 0,0, 3,0, 4,1, 4,2.5, 3,3.5, 0,3.5]]],
+  "Q": [4, [[1,0, 3,0, 4,1, 4,5, 3,6, 1,6, 0,5, 0,1, 1,0], [2.5,4.5, 4.2,6.6]]],
+  "R": [4, [[0,6, 0,0, 3,0, 4,1, 4,2.5, 3,3.5, 0,3.5], [2,3.5, 4,6]]],
+  "S": [4, [[4,1, 3,0, 1,0, 0,1, 0,2.3, 1,3, 3,3, 4,3.7, 4,5, 3,6, 1,6, 0,5]]],
+  "T": [4, [[0,0, 4,0], [2,0, 2,6]]],
+  "U": [4, [[0,0, 0,5, 1,6, 3,6, 4,5, 4,0]]],
+  "V": [4, [[0,0, 2,6, 4,0]]],
+  "W": [4, [[0,0, 1,6, 2,2.5, 3,6, 4,0]]],
+  "X": [4, [[0,0, 4,6], [4,0, 0,6]]],
+  "Y": [4, [[0,0, 2,3, 4,0], [2,3, 2,6]]],
+  "Z": [4, [[0,0, 4,0, 0,6, 4,6]]],
+  "0": [4, [[1,0, 3,0, 4,1, 4,5, 3,6, 1,6, 0,5, 0,1, 1,0], [0.9,4.8, 3.1,1.2]]],
+  "1": [4, [[0.5,1.3, 2,0, 2,6], [0.5,6, 3.5,6]]],
+  "2": [4, [[0,1, 1,0, 3,0, 4,1, 4,2.2, 0,6, 4,6]]],
+  "3": [4, [[0,1, 1,0, 3,0, 4,1, 4,2.2, 3,3, 1.5,3], [3,3, 4,3.8, 4,5, 3,6, 1,6, 0,5]]],
+  "4": [4, [[3,6, 3,0, 0,4.2, 4,4.2]]],
+  "5": [4, [[4,0, 0.3,0, 0,3, 2.8,2.7, 4,3.6, 4,5, 3,6, 1,6, 0,5]]],
+  "6": [4, [[3.5,0.4, 2.5,0, 1.3,0, 0,2, 0,5, 1,6, 3,6, 4,5, 4,3.8, 3,3, 1,3, 0,4]]],
+  "7": [4, [[0,0, 4,0, 1.5,6]]],
+  "8": [4, [[1,0, 3,0, 4,1, 4,2.2, 3,3, 1,3, 0,2.2, 0,1, 1,0], [1,3, 3,3, 4,3.8, 4,5, 3,6, 1,6, 0,5, 0,3.8, 1,3]]],
+  "9": [4, [[4,2.2, 3,3, 1,3, 0,2.2, 0,1, 1,0, 3,0, 4,1, 4,5, 3,6, 1,6, 0.3,5.3]]],
+  ".": [1, [[0.5,5.5, 0.5,6]]],
+  ",": [1, [[0.7,5.5, 0.7,6.2, 0.1,7.4]]],
+  "!": [1, [[0.5,0, 0.5,4], [0.5,5.5, 0.5,6]]],
+  "?": [4, [[0,1, 1,0, 3,0, 4,1, 4,2.2, 2,3.4, 2,4.3], [2,5.5, 2,6]]],
+  "-": [4, [[0.5,3, 3.5,3]]],
+  "+": [4, [[2,1.5, 2,4.5], [0.5,3, 3.5,3]]],
+  "=": [4, [[0.5,2.2, 3.5,2.2], [0.5,3.8, 3.5,3.8]]],
+  ":": [1, [[0.5,2, 0.5,2.4], [0.5,5.6, 0.5,6]]],
+  "'": [1, [[0.5,0, 0.5,1.8]]],
+  "\"": [2, [[0.4,0, 0.4,1.6], [1.6,0, 1.6,1.6]]],
+  "/": [3, [[0,6, 3,0]]],
+  "(": [2, [[1.5,0, 0.4,1.5, 0,3, 0.4,4.5, 1.5,6]]],
+  ")": [2, [[0.5,0, 1.6,1.5, 2,3, 1.6,4.5, 0.5,6]]],
+  "*": [4, [[2,1.2, 2,4.2], [0.7,1.9, 3.3,3.5], [3.3,1.9, 0.7,3.5]]],
+  "#": [4, [[1.3,0.5, 0.9,5.5], [3.1,0.5, 2.7,5.5], [0,2, 4,2], [0,4, 4,4]]],
+  "_": [4, [[0,6.6, 4,6.6]]],
+};
+const SPACE_ADVANCE = 3;
+const LETTER_GAP = 2;
+
+// ============================================================
+// Elements and state
+// ============================================================
 const canvas = document.getElementById("pad");
 const ctx = canvas.getContext("2d");
+const toolbar = document.getElementById("toolbar");
+const popover = document.getElementById("popover");
+const textbar = document.getElementById("textbar");
+const textInput = document.getElementById("textInput");
 const undoBtn = document.getElementById("undo");
-const clearBtn = document.getElementById("clear");
 const submitBtn = document.getElementById("submit");
-const statusEl = document.getElementById("status");
+const colorDot = document.getElementById("colorDot");
+const toastEl = document.getElementById("toast");
+const shapeBtn = toolbar.querySelector('[data-action="shape"]');
 
-let strokes = [];        // each stroke is an array of {x, y} in mm
-let current = null;      // stroke being drawn right now
+let tool = "pencil";
+let shapeKey = "rectangle";
+let eraserSize = "m";
+let textSize = "m";
+let penColor = COLORS[0];
+
+let strokes = [];          // each stroke: { c: "#rrggbb", p: [{x, y}, ...] } in mm
+let history = ["[]"];      // JSON snapshots of strokes; the last one is the current state
+
 let activePointer = null;
+let currentStroke = null;  // pencil stroke being drawn
+let shapeDrag = null;      // { a, b } while dragging out a shape
+let eraseLast = null;
+let eraseChanged = false;
+let hover = null;          // eraser cursor position in mm
+
+let draft = null;          // text being typed: { x, y, size, text }
+let caretOn = true;
+let caretTimer = null;
+let textbarPress = false;
+
+let popoverKind = null;
 let submitting = false;
+let toastTimer = null;
 
-// ---------------- Canvas sizing ----------------
-function resizeCanvas() {
-  const rect = canvas.getBoundingClientRect();
-  const dpr = window.devicePixelRatio || 1;
-  canvas.width = Math.round(rect.width * dpr);
-  canvas.height = Math.round(rect.height * dpr);
-  redraw();
-}
-window.addEventListener("resize", resizeCanvas);
+// ============================================================
+// Geometry helpers
+// ============================================================
+function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)); }
 
-// Convert a pointer event to millimeter coordinates on the bed
 function toMM(e) {
   const rect = canvas.getBoundingClientRect();
-  const x = ((e.clientX - rect.left) / rect.width) * BED_MM;
-  const y = ((e.clientY - rect.top) / rect.height) * BED_MM;
   return {
-    x: Math.min(BED_MM, Math.max(0, x)),
-    y: Math.min(BED_MM, Math.max(0, y)),
+    x: clamp(((e.clientX - rect.left) / rect.width) * BED_MM, 0, BED_MM),
+    y: clamp(((e.clientY - rect.top) / rect.height) * BED_MM, 0, BED_MM),
   };
 }
 
-// ---------------- Drawing ----------------
-function redraw() {
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+function distToSeg(p, a, b) {
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const len2 = dx * dx + dy * dy;
+  let t = len2 === 0 ? 0 : ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2;
+  t = clamp(t, 0, 1);
+  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
+}
+
+// Insert points so no gap between neighbors exceeds maxStep
+function densify(pts, maxStep) {
+  if (pts.length === 0) return [];
+  const out = [pts[0]];
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1], b = pts[i];
+    const n = Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / maxStep);
+    for (let k = 1; k <= n; k++) {
+      out.push({ x: a.x + ((b.x - a.x) * k) / n, y: a.y + ((b.y - a.y) * k) / n });
+    }
+  }
+  return out;
+}
+
+// Ramer-Douglas-Peucker: drop points that sit within eps of a straight line
+function simplify(pts, eps) {
+  if (pts.length < 3) return pts;
+  const keep = new Uint8Array(pts.length);
+  keep[0] = 1;
+  keep[pts.length - 1] = 1;
+  const stack = [[0, pts.length - 1]];
+  while (stack.length) {
+    const [s, e] = stack.pop();
+    let maxD = 0, idx = -1;
+    for (let i = s + 1; i < e; i++) {
+      const d = distToSeg(pts[i], pts[s], pts[e]);
+      if (d > maxD) { maxD = d; idx = i; }
+    }
+    if (idx !== -1 && maxD > eps) {
+      keep[idx] = 1;
+      stack.push([s, idx], [idx, e]);
+    }
+  }
+  return pts.filter((_, i) => keep[i]);
+}
+
+// ============================================================
+// Shapes (defined in a unit square, then stretched to the drag box)
+// ============================================================
+function normalize(pts) {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const [x, y] of pts) {
+    if (x < x0) x0 = x; if (x > x1) x1 = x;
+    if (y < y0) y0 = y; if (y > y1) y1 = y;
+  }
+  const w = (x1 - x0) || 1, h = (y1 - y0) || 1;
+  return pts.map(([x, y]) => [(x - x0) / w, (y - y0) / h]);
+}
+
+function starPoints(n, inner) {
+  const pts = [];
+  for (let i = 0; i < n * 2; i++) {
+    const r = i % 2 === 0 ? 1 : inner;
+    const a = -Math.PI / 2 + (i * Math.PI) / n;
+    pts.push([Math.cos(a) * r, Math.sin(a) * r]);
+  }
+  pts.push(pts[0]);
+  return normalize(pts);
+}
+
+const unitCache = {};
+function unitShape(key) {
+  if (unitCache[key]) return unitCache[key];
+  let polys = [];
+  if (key === "line") {
+    polys = [[[0, 1], [1, 0]]];
+  } else if (key === "rectangle") {
+    polys = [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]];
+  } else if (key === "ellipse") {
+    const p = [];
+    for (let i = 0; i <= 96; i++) {
+      const t = (i / 96) * Math.PI * 2;
+      p.push([0.5 + 0.5 * Math.cos(t), 0.5 + 0.5 * Math.sin(t)]);
+    }
+    polys = [p];
+  } else if (key === "triangle") {
+    polys = [[[0.5, 0], [1, 1], [0, 1], [0.5, 0]]];
+  } else if (key === "star") {
+    polys = [starPoints(5, 0.382)];
+  } else if (key === "star12") {
+    polys = [starPoints(12, 0.72)];
+  } else if (key === "heart") {
+    const p = [];
+    for (let i = 0; i <= 120; i++) {
+      const t = (i / 120) * Math.PI * 2;
+      p.push([
+        16 * Math.pow(Math.sin(t), 3),
+        -(13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t)),
+      ]);
+    }
+    polys = [normalize(p)];
+  }
+  unitCache[key] = polys;
+  return polys;
+}
+
+function shapeIcon(key) {
+  const parts = unitShape(key).map((poly) =>
+    '<polyline points="' + poly.map(([u, v]) => (3 + u * 18).toFixed(2) + "," + (3 + v * 18).toFixed(2)).join(" ") + '"/>'
+  ).join("");
+  return svgIcon(parts);
+}
+
+function buildShape(key, a, b) {
+  if (key === "line") return [{ c: penColor, p: densify([a, b], 1) }];
+  const x0 = Math.min(a.x, b.x), y0 = Math.min(a.y, b.y);
+  const w = Math.abs(a.x - b.x), h = Math.abs(a.y - b.y);
+  return unitShape(key).map((poly) => ({
+    c: penColor,
+    p: densify(poly.map(([u, v]) => ({ x: x0 + u * w, y: y0 + v * h })), 1),
+  }));
+}
+
+// ============================================================
+// Text -> strokes
+// ============================================================
+function textWidthMM(text, size) {
+  let u = 0;
+  for (const ch of text) {
+    if (ch === " ") u += SPACE_ADVANCE;
+    else if (FONT[ch]) u += FONT[ch][0] + LETTER_GAP;
+  }
+  if (text && text[text.length - 1] !== " ") u -= LETTER_GAP;
+  return (u * size) / 6;
+}
+
+function textLayout(d) {
+  const unit = d.size / 6;
+  const wmm = textWidthMM(d.text, d.size);
+  return {
+    unit, wmm,
+    x0: Math.max(0, Math.min(d.x, BED_MM - wmm)),
+    y0: Math.max(0, Math.min(d.y, BED_MM - d.size * 1.3)),
+  };
+}
+
+function textStrokes(d) {
+  const L = textLayout(d);
+  const out = [];
+  let cx = 0;
+  for (const ch of d.text) {
+    if (ch === " ") { cx += SPACE_ADVANCE; continue; }
+    const g = FONT[ch];
+    if (!g) continue;
+    for (const flat of g[1]) {
+      const p = [];
+      for (let i = 0; i < flat.length; i += 2) {
+        p.push({ x: L.x0 + (cx + flat[i]) * L.unit, y: L.y0 + flat[i + 1] * L.unit });
+      }
+      out.push({ c: penColor, p });
+    }
+    cx += g[0] + LETTER_GAP;
+  }
+  return out;
+}
+
+// ============================================================
+// Drawing
+// ============================================================
+function resizeCanvas() {
+  const rect = canvas.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.max(1, Math.round(rect.width * dpr));
+  canvas.height = Math.max(1, Math.round(rect.height * dpr));
+  redraw();
+}
+
+function drawStroke(s) {
+  if (!s.p.length) return;
   const scale = canvas.width / BED_MM;
-  ctx.lineWidth = Math.max(2, 0.6 * scale);
+  ctx.strokeStyle = s.c;
+  ctx.beginPath();
+  ctx.moveTo(s.p[0].x * scale, s.p[0].y * scale);
+  if (s.p.length === 1) ctx.lineTo(s.p[0].x * scale + 0.01, s.p[0].y * scale);
+  for (let i = 1; i < s.p.length; i++) ctx.lineTo(s.p[i].x * scale, s.p[i].y * scale);
+  ctx.stroke();
+}
+
+function redraw() {
+  const dpr = window.devicePixelRatio || 1;
+  const scale = canvas.width / BED_MM;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.lineWidth = Math.max(1.6 * dpr, 0.8 * scale);
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
-  ctx.strokeStyle = "#111";
-  const all = current ? strokes.concat([current]) : strokes;
-  for (const s of all) {
-    if (s.length === 0) continue;
+
+  for (const s of strokes) drawStroke(s);
+  if (currentStroke) drawStroke(currentStroke);
+  if (shapeDrag) for (const s of buildShape(shapeKey, shapeDrag.a, shapeDrag.b)) drawStroke(s);
+
+  if (draft) {
+    for (const s of textStrokes(draft)) drawStroke(s);
+    if (caretOn) {
+      const L = textLayout(draft);
+      const cx = (L.x0 + L.wmm + (draft.text ? L.unit * 0.8 : 0)) * scale;
+      ctx.strokeStyle = "#3e63dd";
+      ctx.lineWidth = 1.5 * dpr;
+      ctx.beginPath();
+      ctx.moveTo(cx, L.y0 * scale);
+      ctx.lineTo(cx, (L.y0 + draft.size) * scale);
+      ctx.stroke();
+    }
+  }
+
+  if (tool === "eraser" && hover) {
     ctx.beginPath();
-    ctx.moveTo(s[0].x * scale, s[0].y * scale);
-    if (s.length === 1) {
-      ctx.lineTo(s[0].x * scale + 0.01, s[0].y * scale);
-    }
-    for (let i = 1; i < s.length; i++) {
-      ctx.lineTo(s[i].x * scale, s[i].y * scale);
-    }
+    ctx.arc(hover.x * scale, hover.y * scale, ERASER_RADIUS[eraserSize] * scale, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(255, 255, 255, 0.55)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(23, 23, 26, 0.55)";
+    ctx.lineWidth = 1.5 * dpr;
     ctx.stroke();
   }
 }
 
-function addPoint(p) {
-  const last = current[current.length - 1];
-  if (last && Math.hypot(p.x - last.x, p.y - last.y) < MIN_POINT_SPACING) return;
-  current.push(p);
+// ============================================================
+// History
+// ============================================================
+function commit() {
+  history.push(JSON.stringify(strokes));
+  if (history.length > 100) history.shift();
+  updateButtons();
 }
 
+function undo() {
+  if (draft) { cancelText(); return; }
+  if (history.length <= 1) return;
+  history.pop();
+  strokes = JSON.parse(history[history.length - 1]);
+  redraw();
+  updateButtons();
+}
+
+function updateButtons() {
+  const hasDraftText = !!(draft && draft.text.trim());
+  undoBtn.disabled = history.length <= 1 && !draft;
+  submitBtn.disabled = submitting || (strokes.length === 0 && !hasDraftText);
+}
+
+// ============================================================
+// Eraser (splits strokes so only the touched part disappears)
+// ============================================================
+function strokeNearSegment(pts, a, b, r) {
+  let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
+  for (const p of pts) {
+    if (p.x < minx) minx = p.x; if (p.x > maxx) maxx = p.x;
+    if (p.y < miny) miny = p.y; if (p.y > maxy) maxy = p.y;
+  }
+  return !(
+    maxx < Math.min(a.x, b.x) - r || minx > Math.max(a.x, b.x) + r ||
+    maxy < Math.min(a.y, b.y) - r || miny > Math.max(a.y, b.y) + r
+  );
+}
+
+function eraseSegment(a, b) {
+  const r = ERASER_RADIUS[eraserSize];
+  let changed = false;
+  const next = [];
+  for (const s of strokes) {
+    if (!strokeNearSegment(s.p, a, b, r)) { next.push(s); continue; }
+    const dense = densify(s.p, 0.5);
+    let hit = false;
+    for (const p of dense) { if (distToSeg(p, a, b) <= r) { hit = true; break; } }
+    if (!hit) { next.push(s); continue; }
+    changed = true;
+    let cur = [];
+    for (const p of dense) {
+      if (distToSeg(p, a, b) <= r) {
+        if (cur.length >= 2) next.push({ c: s.c, p: cur });
+        cur = [];
+      } else {
+        cur.push(p);
+      }
+    }
+    if (cur.length >= 2) next.push({ c: s.c, p: cur });
+  }
+  strokes = next;
+  return changed;
+}
+
+// ============================================================
+// Pointer input
+// ============================================================
 canvas.addEventListener("pointerdown", (e) => {
+  if (tool === "text") return;            // text is placed on click
   if (activePointer !== null || submitting) return;
   activePointer = e.pointerId;
   canvas.setPointerCapture(e.pointerId);
-  current = [toMM(e)];
-  setStatus("");
+  const p = toMM(e);
+
+  if (tool === "pencil") {
+    currentStroke = { c: penColor, p: [p] };
+  } else if (tool === "eraser") {
+    hover = p;
+    eraseLast = p;
+    eraseChanged = eraseSegment(p, p);
+  } else if (tool === "shape") {
+    shapeDrag = { a: p, b: p };
+  }
   redraw();
   e.preventDefault();
 });
 
 canvas.addEventListener("pointermove", (e) => {
-  if (e.pointerId !== activePointer || !current) return;
+  if (e.pointerId !== activePointer) {
+    if (tool === "eraser" && e.pointerType === "mouse") { hover = toMM(e); redraw(); }
+    return;
+  }
   const events = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
-  for (const ev of (events.length ? events : [e])) addPoint(toMM(ev));
+  for (const ev of (events.length ? events : [e])) {
+    const p = toMM(ev);
+    if (tool === "pencil" && currentStroke) {
+      const last = currentStroke.p[currentStroke.p.length - 1];
+      if (Math.hypot(p.x - last.x, p.y - last.y) >= MIN_POINT_SPACING) currentStroke.p.push(p);
+    } else if (tool === "eraser") {
+      hover = p;
+      if (eraseSegment(eraseLast, p)) eraseChanged = true;
+      eraseLast = p;
+    } else if (tool === "shape" && shapeDrag) {
+      shapeDrag.b = p;
+    }
+  }
   redraw();
   e.preventDefault();
 });
 
-function endStroke(e) {
+function endPointer(e) {
   if (e.pointerId !== activePointer) return;
   activePointer = null;
-  // A stroke needs at least 2 points to be something the plotter can draw
-  if (current && current.length >= 2) strokes.push(current);
-  current = null;
+
+  if (tool === "pencil" && currentStroke) {
+    if (currentStroke.p.length >= 2) { strokes.push(currentStroke); commit(); }
+    currentStroke = null;
+  } else if (tool === "eraser") {
+    if (eraseChanged) commit();
+    eraseChanged = false;
+    eraseLast = null;
+    if (e.pointerType !== "mouse") hover = null;
+  } else if (tool === "shape" && shapeDrag) {
+    const { a, b } = shapeDrag;
+    if (Math.hypot(b.x - a.x, b.y - a.y) >= 3) {
+      for (const s of buildShape(shapeKey, a, b)) strokes.push(s);
+      commit();
+    }
+    shapeDrag = null;
+  }
   redraw();
-  updateButtons();
 }
-canvas.addEventListener("pointerup", endStroke);
-canvas.addEventListener("pointercancel", endStroke);
-
-// ---------------- Buttons ----------------
-function updateButtons() {
-  const has = strokes.length > 0;
-  undoBtn.disabled = !has || submitting;
-  clearBtn.disabled = !has || submitting;
-  submitBtn.disabled = !has || submitting;
-}
-
-function setStatus(msg, kind) {
-  statusEl.textContent = msg;
-  statusEl.className = kind || "";
-}
-
-undoBtn.addEventListener("click", () => {
-  strokes.pop();
-  redraw();
-  updateButtons();
-  setStatus("");
+canvas.addEventListener("pointerup", endPointer);
+canvas.addEventListener("pointercancel", endPointer);
+canvas.addEventListener("pointerleave", () => {
+  if (activePointer === null && hover) { hover = null; redraw(); }
 });
 
-clearBtn.addEventListener("click", () => {
-  strokes = [];
-  redraw();
-  updateButtons();
-  setStatus("");
+// ============================================================
+// Text tool
+// ============================================================
+canvas.addEventListener("click", (e) => {
+  if (tool !== "text" || submitting) return;
+  startText(toMM(e));
 });
 
-// ---------------- SVG + submit ----------------
+function startText(p) {
+  commitText();
+  draft = { x: p.x, y: p.y, size: TEXT_HEIGHT[textSize], text: "" };
+  textInput.value = "";
+  textbar.hidden = false;
+  textInput.focus();
+  caretOn = true;
+  clearInterval(caretTimer);
+  caretTimer = setInterval(() => { caretOn = !caretOn; redraw(); }, 530);
+  redraw();
+  updateButtons();
+}
+
+function endDraft() {
+  draft = null;
+  clearInterval(caretTimer);
+  caretTimer = null;
+  textbar.hidden = true;
+  textInput.blur();
+}
+
+function commitText() {
+  if (!draft) return;
+  const d = { ...draft, text: draft.text.replace(/\s+$/, "") };
+  endDraft();
+  if (d.text) {
+    for (const s of textStrokes(d)) strokes.push(s);
+    commit();
+  }
+  redraw();
+  updateButtons();
+}
+
+function cancelText() {
+  if (!draft) return;
+  endDraft();
+  redraw();
+  updateButtons();
+}
+
+textInput.addEventListener("input", () => {
+  if (!draft) return;
+  let v = textInput.value.toUpperCase().split("").filter((ch) => ch === " " || FONT[ch]).join("");
+  if (textWidthMM(v, draft.size) > BED_MM) v = draft.text;   // refuse text wider than the bed
+  textInput.value = v;
+  draft.text = v;
+  caretOn = true;
+  redraw();
+  updateButtons();
+});
+textInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); commitText(); }
+  else if (e.key === "Escape") { e.preventDefault(); cancelText(); }
+});
+textInput.addEventListener("blur", () => { if (!textbarPress) commitText(); });
+
+textbar.addEventListener("pointerdown", () => {
+  textbarPress = true;
+  setTimeout(() => { textbarPress = false; }, 400);
+});
+textbar.addEventListener("mousedown", (e) => { if (e.target.closest("button")) e.preventDefault(); });
+document.getElementById("textDone").addEventListener("click", commitText);
+document.getElementById("textCancel").addEventListener("click", cancelText);
+
+// ============================================================
+// Toolbar and popovers
+// ============================================================
+function refreshToolUI() {
+  for (const b of toolbar.querySelectorAll(".tool")) {
+    const a = b.dataset.action;
+    b.classList.toggle("active", a === tool);
+  }
+  canvas.dataset.tool = tool;
+  shapeBtn.innerHTML = shapeIcon(shapeKey);
+  hover = null;
+  redraw();
+}
+
+function closePopover() {
+  popover.hidden = true;
+  popoverKind = null;
+}
+
+function openPopover(kind, anchor) {
+  popoverKind = kind;
+  popover.className = "popover " + kind;
+  let html = "";
+  if (kind === "shape") {
+    html = SHAPE_KEYS.map((k) =>
+      '<button class="opt' + (k === shapeKey && tool === "shape" ? " sel" : "") + '" data-shape="' + k +
+      '" title="' + SHAPE_LABELS[k] + '" aria-label="' + SHAPE_LABELS[k] + '">' + shapeIcon(k) + "</button>"
+    ).join("");
+  } else if (kind === "eraser") {
+    const diam = { s: 10, m: 16, l: 24 };
+    html = ["s", "m", "l"].map((k) =>
+      '<button class="opt' + (k === eraserSize ? " sel" : "") + '" data-eraser="' + k +
+      '" aria-label="Eraser size ' + k.toUpperCase() + '"><span class="ring" style="width:' + diam[k] + "px;height:" + diam[k] + 'px"></span></button>'
+    ).join("");
+  } else if (kind === "text") {
+    const fs = { s: 13, m: 18, l: 24 };
+    html = ["s", "m", "l"].map((k) =>
+      '<button class="opt' + (k === textSize ? " sel" : "") + '" data-textsize="' + k +
+      '" aria-label="Text size ' + k.toUpperCase() + '"><span style="font-size:' + fs[k] + 'px;font-weight:700;line-height:1">A</span></button>'
+    ).join("");
+  } else if (kind === "color") {
+    html = COLORS.map((c) =>
+      '<button class="swatch' + (c === penColor ? " sel" : "") + '" data-color="' + c +
+      '" style="background:' + c + '" aria-label="Color ' + c + '"></button>'
+    ).join("") +
+      '<label class="swatch custom" title="Custom color"><input type="color" id="customColor" value="' + penColor + '" aria-label="Custom color"></label>';
+  }
+  popover.innerHTML = html;
+  popover.hidden = false;
+
+  const a = anchor.getBoundingClientRect();
+  const t = toolbar.getBoundingClientRect();
+  const h = popover.offsetHeight;
+  popover.style.left = t.right + 10 + "px";
+  popover.style.top = clamp(a.top + a.height / 2 - h / 2, 8, window.innerHeight - h - 8) + "px";
+}
+
+function setColor(c) {
+  penColor = c;
+  colorDot.style.background = c;
+  redraw();
+}
+
+toolbar.addEventListener("mousedown", (e) => { if (e.target.closest("button")) e.preventDefault(); });
+popover.addEventListener("mousedown", (e) => { if (e.target.closest("button")) e.preventDefault(); });
+
+toolbar.addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-action]");
+  if (!b || b.disabled) return;
+  const a = b.dataset.action;
+
+  if (a === "undo") { undo(); return; }
+  if (a === "color") {
+    if (popoverKind === "color") closePopover(); else openPopover("color", b);
+    return;
+  }
+
+  commitText();   // switching tools finishes any text in progress
+  if (a === "shape") {
+    tool = "shape";
+    refreshToolUI();
+    if (popoverKind === "shape") closePopover(); else openPopover("shape", b);
+    return;
+  }
+  const wasActive = tool === a;
+  tool = a;
+  refreshToolUI();
+  if ((a === "eraser" || a === "text") && wasActive) {
+    if (popoverKind === a) closePopover(); else openPopover(a, b);
+  } else {
+    closePopover();
+  }
+});
+
+popover.addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  if (b.dataset.shape) {
+    commitText();
+    shapeKey = b.dataset.shape;
+    tool = "shape";
+    refreshToolUI();
+    closePopover();
+  } else if (b.dataset.eraser) {
+    eraserSize = b.dataset.eraser;
+    closePopover();
+  } else if (b.dataset.textsize) {
+    textSize = b.dataset.textsize;
+    closePopover();
+  } else if (b.dataset.color) {
+    setColor(b.dataset.color);
+    closePopover();
+  }
+});
+popover.addEventListener("input", (e) => {
+  if (e.target.id === "customColor") setColor(e.target.value);
+});
+
+document.addEventListener("pointerdown", (e) => {
+  if (!popover.hidden && !popover.contains(e.target) && !toolbar.contains(e.target)) closePopover();
+});
+document.addEventListener("keydown", (e) => {
+  if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "z" && document.activeElement !== textInput) {
+    e.preventDefault();
+    undo();
+  } else if (e.key === "Escape") {
+    closePopover();
+  }
+});
+
+// ============================================================
+// Submit
+// ============================================================
+function toast(msg, kind) {
+  toastEl.textContent = msg;
+  toastEl.className = "toast show " + (kind || "");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toastEl.classList.remove("show"), kind === "err" ? 4500 : 3000);
+}
+
 function buildSVG() {
   const round = (n) => Math.round(n * 100) / 100;
-  const lines = strokes.map((s) => {
-    const pts = s.map((p) => round(p.x) + "," + round(p.y)).join(" ");
-    return '  <polyline points="' + pts + '" fill="none" stroke="black" stroke-width="0.5" stroke-linecap="round" stroke-linejoin="round"/>';
-  });
+  const lines = [];
+  for (const s of strokes) {
+    const pts = simplify(s.p, 0.05);
+    if (pts.length < 2) continue;
+    lines.push(
+      '  <polyline points="' + pts.map((p) => round(p.x) + "," + round(p.y)).join(" ") +
+      '" fill="none" stroke="' + s.c + '" stroke-width="0.5" stroke-linecap="round" stroke-linejoin="round"/>'
+    );
+  }
+  if (lines.length === 0) return null;
   return (
     '<svg xmlns="http://www.w3.org/2000/svg" width="' + BED_MM + 'mm" height="' + BED_MM +
-    'mm" viewBox="0 0 ' + BED_MM + " " + BED_MM + '">\n' +
-    lines.join("\n") +
-    "\n</svg>"
+    'mm" viewBox="0 0 ' + BED_MM + " " + BED_MM + '">\n' + lines.join("\n") + "\n</svg>"
   );
 }
 
 submitBtn.addEventListener("click", async () => {
-  if (submitting || strokes.length === 0) return;
+  if (submitting) return;
+  commitText();
   const svg = buildSVG();
+  if (!svg) return;
   if (svg.length > MAX_SVG_CHARS) {
-    setStatus("That drawing is too detailed to send. Try Undo or Clear and draw less.", "err");
+    toast("Too detailed to send. Undo a few strokes and try again.", "err");
     return;
   }
 
   submitting = true;
+  submitBtn.textContent = "Sending...";
   updateButtons();
-  setStatus("Sending...");
 
   try {
     const res = await fetch(SUPABASE_URL + "/rest/v1/submissions", {
@@ -234,23 +1077,37 @@ submitBtn.addEventListener("click", async () => {
       body: JSON.stringify({ svg: svg }),
     });
     if (!res.ok) {
-      const text = await res.text();
-      console.error("Submit failed:", res.status, text);
+      console.error("Submit failed:", res.status, await res.text());
       throw new Error("Server said " + res.status);
     }
     strokes = [];
+    history = ["[]"];
     redraw();
-    setStatus("Sent! Your drawing is in the queue.", "ok");
+    toast("Sent! Your design is in the queue.", "ok");
   } catch (err) {
     console.error(err);
-    setStatus("Could not send. Check your connection and try again.", "err");
+    toast("Could not send. Check your connection and try again.", "err");
   } finally {
     submitting = false;
+    submitBtn.textContent = "Submit design";
     updateButtons();
   }
 });
 
-// ---------------- Start ----------------
+// ============================================================
+// Start
+// ============================================================
+toolbar.querySelector('[data-action="pencil"]').innerHTML = ICONS.pencil;
+toolbar.querySelector('[data-action="eraser"]').innerHTML = ICONS.eraser;
+toolbar.querySelector('[data-action="text"]').innerHTML = ICONS.text;
+undoBtn.innerHTML = ICONS.undo;
+document.getElementById("textCancel").innerHTML = ICONS.close;
+document.getElementById("textDone").innerHTML = ICONS.check;
+colorDot.style.background = penColor;
+
+new ResizeObserver(resizeCanvas).observe(canvas);
+window.addEventListener("resize", () => { closePopover(); resizeCanvas(); });
+refreshToolUI();
 resizeCanvas();
 updateButtons();
 </script>
