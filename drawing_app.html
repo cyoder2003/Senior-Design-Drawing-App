@@ -298,6 +298,32 @@
   .toast.err { background: #b42318; }
   .toast.ok { background: #1a7f37; }
 
+  dialog.submit-dialog {
+    width: min(440px, calc(100vw - 32px)); max-width: none; padding: 0; border: 0;
+    border-radius: 20px; color: var(--ink); background: var(--surface);
+    box-shadow: 0 24px 80px rgba(16, 16, 24, 0.24);
+  }
+  dialog.submit-dialog::backdrop { background: rgba(18, 18, 24, 0.42); }
+  .submit-form { padding: 24px; }
+  .submit-form h2 { margin: 0; font-size: 20px; letter-spacing: -0.02em; }
+  .submit-form > p { margin: 6px 0 18px; color: #666672; font-size: 14px; line-height: 1.4; }
+  .placement-options { display: grid; gap: 9px; margin: 18px 0 20px; }
+  .placement-option {
+    display: flex; align-items: flex-start; gap: 10px; padding: 12px;
+    border: 1px solid #e0e0e6; border-radius: 12px; cursor: pointer;
+  }
+  .placement-option:has(input:checked) { border-color: #7777ed; background: #f6f6ff; }
+  .placement-option input { margin: 3px 0 0; accent-color: #5c5cdb; }
+  .placement-option strong { display: block; font-size: 14px; }
+  .placement-option small { display: block; margin-top: 3px; color: #666672; font-size: 12px; line-height: 1.35; }
+  .submit-actions { display: flex; justify-content: flex-end; gap: 9px; }
+  .submit-actions button {
+    min-width: 92px; height: 42px; padding: 0 15px; border: 0; border-radius: 11px;
+    font: inherit; font-size: 14px; font-weight: 650; cursor: pointer;
+  }
+  .submit-actions .cancel { color: var(--ink); background: #f0f0f3; }
+  .submit-actions .confirm { color: #fff; background: #5c5cdb; }
+
   /* ---------- Phones: slimmer toolbar so the canvas sits closer to center ---------- */
   @media (max-width: 560px) {
     .toolbar { width: 50px; margin-left: 6px; padding: 4px; }
@@ -347,6 +373,27 @@
   </footer>
 </div>
 
+<dialog class="submit-dialog" id="submitDialog" aria-labelledby="submitDialogTitle">
+  <form class="submit-form" id="submitForm">
+    <h2 id="submitDialogTitle">Position on circular canvas</h2>
+    <p>Choose how the design should be centered and scaled.</p>
+    <div class="placement-options" role="radiogroup" aria-label="Circular canvas placement">
+      <label class="placement-option">
+        <input type="radio" name="placement" value="artwork_center" checked>
+        <span><strong>Artwork centered</strong><small>Center by the artwork’s bounding box, then scale it to fit.</small></span>
+      </label>
+      <label class="placement-option">
+        <input type="radio" name="placement" value="canvas_center">
+        <span><strong>Canvas centered</strong><small>Keep the app canvas center fixed and scale around it to fit the circle.</small></span>
+      </label>
+    </div>
+    <div class="submit-actions">
+      <button class="cancel" type="button" id="cancelSubmit">Cancel</button>
+      <button class="confirm" type="submit">Send design</button>
+    </div>
+  </form>
+</dialog>
+
 <div class="popover" id="popover" hidden></div>
 
 <div class="textbar" id="textbar" hidden>
@@ -365,21 +412,17 @@
 const SUPABASE_URL = "https://azgqtxtweqiagektvwmm.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_ADAbV7_ZrRidQ5XIWRBJjQ_PnNjQWfI";
 
-const BED_MM = 200;             // the drawing area on screen is BED_MM x BED_MM (all drawing math is in these units)
-const MIN_POINT_SPACING = 0.3;  // pencil skips points closer than this
+const CANVAS_UNITS = 1000;      // fixed, resolution-independent drawing coordinate grid
+const MIN_POINT_SPACING = 1;    // avoid storing nearly duplicate pencil points
 const MAX_SVG_CHARS = 200000;   // must match the limit in the database
 
-// The exported SVG is resolution independent: every coordinate is a position on a
-// EXPORT_UNITS x EXPORT_UNITS grid, so (500, 500) is always the middle of the page.
-// NOMINAL_SIZE_MM is only the physical size the file claims by default. Change width/height
-// on the <svg> tag (or scale in your pipeline) and the whole design scales with it.
-const EXPORT_UNITS = 1000;
-const NOMINAL_SIZE_MM = 200;
-const STROKE_WIDTH_MM = 0.5;    // one pen width for everything
+// SVG coordinates use the same fixed grid. Physical scale is assigned downstream.
+const SVG_STROKE_WIDTH = 1.6667;
+const DISPLAY_STROKE_WIDTH = 2.6667;
 
 const COLORS = ["#17171a", "#e5484d", "#f76b15", "#ffc53d", "#30a46c", "#3e63dd", "#8e4ec6", "#d6409f"];
-const ERASER_RADIUS = { s: 2, m: 5, l: 12 };   // mm
-const TEXT_HEIGHT = { s: 6, m: 10, l: 16 };    // mm, size of new text
+const ERASER_RADIUS = { s: 6.6667, m: 16.6667, l: 40 };
+const TEXT_HEIGHT = { s: 20, m: 33.3333, l: 53.3333 };
 
 const SHAPE_KEYS = ["ellipse", "triangle", "rectangle", "star", "shimmer", "heart"];
 const SHAPE_LABELS = {
@@ -394,7 +437,7 @@ const EDGE_INNER_PX = 10;       // how far inside a side a touch still grabs it
 const LINE_GRAB_PX = 24;        // how close a touch must be to a line or pencil stroke
 const BOX_MARGIN_PX = 10;       // extra grab area around a selection
 const LINE_END_GRAB_PX = 18;
-const MOVE_SLOP_MM = 0.7;       // dragging less than this counts as a tap
+const MOVE_SLOP_UNITS = 2.3333; // dragging less than this counts as a tap
 
 // ============================================================
 // Icons (24x24, stroke style)
@@ -611,6 +654,8 @@ const textInput = $("textInput");
 const fontSelect = $("fontSelect");
 const undoBtn = $("undo");
 const submitBtn = $("submit");
+const submitDialog = $("submitDialog");
+const submitForm = $("submitForm");
 const colorDot = $("colorDot");
 const toastEl = $("toast");
 const shapeBtn = toolbar.querySelector('[data-action="shape"]');
@@ -622,7 +667,7 @@ let textSize = "m";
 let penColor = COLORS[0];
 let fontFamily = "Print";
 
-// Everything drawn lives in `strokes`, in mm on the bed:
+// Everything drawn lives in `strokes`, on the fixed canvas coordinate grid:
 //   pencil line / shape piece:  { c, p: [{x, y}, ...], gid, frame }
 //   text:                       { kind: "text", gid, text, font, c, size, x, y, sx, sy, rotation, flipX, flipY, frame }
 //   (x, y) is the center of the text box and sx / sy are how much the user has stretched it.
@@ -656,21 +701,21 @@ let popoverKind = null;
 let submitting = false;
 let toastTimer = null;
 let dpr = 1;
-let cssPerMM = 1;
+let cssPerUnit = 1;
 
 // ============================================================
 // Geometry helpers
 // ============================================================
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const clone = (o) => JSON.parse(JSON.stringify(o));
-const pxToMM = (px) => px / cssPerMM;
+const pxToUnits = (px) => px / cssPerUnit;
 const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 
-function toMM(e) {
+function toCanvasUnits(e) {
   const rect = canvas.getBoundingClientRect();
   return {
-    x: clamp(((e.clientX - rect.left) / rect.width) * BED_MM, 0, BED_MM),
-    y: clamp(((e.clientY - rect.top) / rect.height) * BED_MM, 0, BED_MM),
+    x: clamp(((e.clientX - rect.left) / rect.width) * CANVAS_UNITS, 0, CANVAS_UNITS),
+    y: clamp(((e.clientY - rect.top) / rect.height) * CANVAS_UNITS, 0, CANVAS_UNITS),
   };
 }
 
@@ -779,12 +824,12 @@ function clipSeg(a, b, x0, y0, x1, y1) {
   return [{ x: a.x + t0 * dx, y: a.y + t0 * dy }, { x: a.x + t1 * dx, y: a.y + t1 * dy }];
 }
 
-// Keep only the parts of a polyline that lie on the bed, so the plotter never leaves its area
+// Keep only the parts of a polyline inside the square app canvas
 function clipToBed(pts) {
   const runs = [];
   let run = null;
   for (let i = 1; i < pts.length; i++) {
-    const seg = clipSeg(pts[i - 1], pts[i], 0, 0, BED_MM, BED_MM);
+    const seg = clipSeg(pts[i - 1], pts[i], 0, 0, CANVAS_UNITS, CANVAS_UNITS);
     if (!seg) { if (run && run.length > 1) runs.push(run); run = null; continue; }
     const [p, q] = seg;
     if (run && dist(run[run.length - 1], p) > 1e-6) { if (run.length > 1) runs.push(run); run = null; }
@@ -897,7 +942,7 @@ function buildShape(key, a, b) {
 // ============================================================
 const textCache = new WeakMap();
 
-// The pen paths of a text stroke, in mm on the bed
+// The pen paths used to render a text stroke on the canvas grid
 function textStrokes(d) {
   const sig = [d.text, d.font, d.size, d.x, d.y, d.sx, d.sy, d.rotation, d.flipX, d.flipY, d.c].join("|");
   const hit = textCache.get(d);
@@ -927,10 +972,10 @@ function placeDraft(d) {
   const off = layout.anchorDY * unit * d.sy * (d.flipY ? -1 : 1);
   d.x = d.ax + off * Math.sin(d.rotation);
   d.y = d.ay - off * Math.cos(d.rotation);
-  if (d.rotation === 0) {        // keep upright text on the bed
+  if (d.rotation === 0) {        // keep upright text within the app canvas
     const w = layout.w * unit * d.sx, h = layout.h * unit * d.sy;
-    d.x = w >= BED_MM ? BED_MM / 2 : clamp(d.x, w / 2, BED_MM - w / 2);
-    d.y = h >= BED_MM ? BED_MM / 2 : clamp(d.y, h / 2, BED_MM - h / 2);
+    d.x = w >= CANVAS_UNITS ? CANVAS_UNITS / 2 : clamp(d.x, w / 2, CANVAS_UNITS - w / 2);
+    d.y = h >= CANVAS_UNITS ? CANVAS_UNITS / 2 : clamp(d.y, h / 2, CANVAS_UNITS - h / 2);
   }
 }
 
@@ -1075,7 +1120,7 @@ function duplicateSelection() {
 function groupAt(p) {
   let best = null, bestArea = Infinity;
   const seen = new Set();
-  const reach = pxToMM(LINE_GRAB_PX);
+  const reach = pxToUnits(LINE_GRAB_PX);
   for (let i = strokes.length - 1; i >= 0; i--) {
     const s = strokes[i], f = s.frame;
     if (!s.gid || !f || seen.has(s.gid)) continue;
@@ -1165,17 +1210,17 @@ function resizeCanvas() {
   dpr = window.devicePixelRatio || 1;
   canvas.width = Math.max(1, Math.round(rect.width * dpr));
   canvas.height = Math.max(1, Math.round(rect.height * dpr));
-  cssPerMM = (rect.width || BED_MM) / BED_MM;
+  cssPerUnit = (rect.width || CANVAS_UNITS) / CANVAS_UNITS;
   redraw();
 }
 
 function drawStroke(s) {
   if (!s.p.length) return;
-  const scale = canvas.width / BED_MM;
+  const scale = canvas.width / CANVAS_UNITS;
   ctx.strokeStyle = s.c;
   ctx.beginPath();
   ctx.moveTo(s.p[0].x * scale, s.p[0].y * scale);
-  if (s.p.length === 1) ctx.lineTo(s.p[0].x * scale + 0.01, s.p[0].y * scale);
+  if (s.p.length === 1) ctx.lineTo(s.p[0].x * scale + 0.0333 * scale, s.p[0].y * scale);
   for (let i = 1; i < s.p.length; i++) ctx.lineTo(s.p[i].x * scale, s.p[i].y * scale);
   ctx.stroke();
 }
@@ -1186,7 +1231,7 @@ function mirrorVector(v) {
 }
 
 function mirrorPoint(p) {
-  const center = { x: BED_MM / 2, y: BED_MM / 2 };
+  const center = { x: CANVAS_UNITS / 2, y: CANVAS_UNITS / 2 };
   const v = mirrorVector({ x: p.x - center.x, y: p.y - center.y });
   return { x: center.x + v.x, y: center.y + v.y };
 }
@@ -1288,17 +1333,17 @@ function drawSelection(scale) {
 
 function mirrorAxisHalfLength() {
   const c = Math.abs(Math.cos(mirrorAngle)), s = Math.abs(Math.sin(mirrorAngle));
-  return Math.min((BED_MM / 2) / Math.max(c, 0.0001), (BED_MM / 2) / Math.max(s, 0.0001));
+  return Math.min((CANVAS_UNITS / 2) / Math.max(c, 0.0001), (CANVAS_UNITS / 2) / Math.max(s, 0.0001));
 }
 
 function mirrorAxisEndpoints() {
   const half = mirrorAxisHalfLength();
   const dx = Math.cos(mirrorAngle) * half, dy = Math.sin(mirrorAngle) * half;
-  return { a: { x: BED_MM / 2 - dx, y: BED_MM / 2 - dy }, b: { x: BED_MM / 2 + dx, y: BED_MM / 2 + dy } };
+  return { a: { x: CANVAS_UNITS / 2 - dx, y: CANVAS_UNITS / 2 - dy }, b: { x: CANVAS_UNITS / 2 + dx, y: CANVAS_UNITS / 2 + dy } };
 }
 
 function updateMirrorAngle(point) {
-  let angle = Math.atan2(point.y - BED_MM / 2, point.x - BED_MM / 2);
+  let angle = Math.atan2(point.y - CANVAS_UNITS / 2, point.x - CANVAS_UNITS / 2);
   angle = ((angle % Math.PI) + Math.PI) % Math.PI;
   const step = Math.PI / 4, snap = Math.round(angle / step) * step;
   const distance = Math.abs(angle - snap);
@@ -1316,9 +1361,9 @@ function drawMirrorAxis(scale) {
 }
 
 function redraw() {
-  const scale = canvas.width / BED_MM;
+  const scale = canvas.width / CANVAS_UNITS;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.lineWidth = Math.max(1.6 * dpr, 0.8 * scale);
+  ctx.lineWidth = Math.max(1.6 * dpr, DISPLAY_STROKE_WIDTH * scale);
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
 
@@ -1448,7 +1493,7 @@ function beginSelect(p) {
   selection.ids = selection.ids.filter((id) => strokes.some((s) => s.gid === id));
   let keep = false;
   if (selection.ids.length) {
-    const f = selectionFrame(), pad = pxToMM(BOX_MARGIN_PX);
+    const f = selectionFrame(), pad = pxToUnits(BOX_MARGIN_PX);
     const l = toLocal({ x: f.cx, y: f.cy }, f.angle || 0, p);
     keep = selection.ids.includes(hitId) || (!hitId && Math.abs(l.x) <= f.w / 2 + pad && Math.abs(l.y) <= f.h / 2 + pad);
   }
@@ -1472,18 +1517,18 @@ function beginSelect(p) {
   if (ids.length === 1 && frame.shapeKey === "line") {
     const line = drag.original.find((s) => s.p), first = line.p[0], last = line.p[line.p.length - 1];
     const d0 = dist(p, first), d1 = dist(p, last);
-    const radius = Math.min(pxToMM(LINE_END_GRAB_PX), dist(first, last) * 0.32);
+    const radius = Math.min(pxToUnits(LINE_END_GRAB_PX), dist(first, last) * 0.32);
     if (Math.min(d0, d1) <= radius) { drag.mode = "lineEndpoint"; drag.endpoint = d0 <= d1 ? 0 : 1; }
     return;
   }
 
   // Sides and corners are grabbed mostly from outside the box, so small boxes (short text)
   // still have a middle you can drag to move them
-  const l = toLocal(drag.center, frame.angle || 0, p), tol = pxToMM(EDGE_GRAB_PX);
-  const cornerReach = Math.min(pxToMM(HANDLE_GRAB_PX), 0.4 * Math.min(frame.w, frame.h));
+  const l = toLocal(drag.center, frame.angle || 0, p), tol = pxToUnits(EDGE_GRAB_PX);
+  const cornerReach = Math.min(pxToUnits(HANDLE_GRAB_PX), 0.4 * Math.min(frame.w, frame.h));
   const cornerIndex = frameCorners(frame).findIndex((q) => dist(p, q) < cornerReach);
   const outX = Math.abs(l.x) - frame.w / 2, outY = Math.abs(l.y) - frame.h / 2;
-  const innerX = Math.min(pxToMM(EDGE_INNER_PX), frame.w * 0.15), innerY = Math.min(pxToMM(EDGE_INNER_PX), frame.h * 0.15);
+  const innerX = Math.min(pxToUnits(EDGE_INNER_PX), frame.w * 0.15), innerY = Math.min(pxToUnits(EDGE_INNER_PX), frame.h * 0.15);
   const hitX = outX >= -innerX && outX <= tol && outY <= tol;
   const hitY = outY >= -innerY && outY <= tol && outX <= tol;
   const signs = cornerIndex >= 0 ? [[-1, -1], [1, -1], [1, 1], [-1, 1]][cornerIndex] : [Math.sign(l.x) || 1, Math.sign(l.y) || 1];
@@ -1495,7 +1540,7 @@ function beginSelect(p) {
 
 function updateDrag(p) {
   const t = drag, f = t.frame, c = t.center, angle = f.angle || 0;
-  if (dist(p, t.start) > MOVE_SLOP_MM) t.moved = true;
+  if (dist(p, t.start) > MOVE_SLOP_UNITS) t.moved = true;
   t.indices.forEach((idx, k) => { strokes[idx] = clone(t.original[k]); });   // always start from the original
   if (!t.moved) return;
   const next = { ...f };
@@ -1514,8 +1559,8 @@ function updateDrag(p) {
   }
 
   if (t.mode === "move") {
-    next.cx = clamp(f.cx + p.x - t.start.x, 0, BED_MM);
-    next.cy = clamp(f.cy + p.y - t.start.y, 0, BED_MM);
+    next.cx = clamp(f.cx + p.x - t.start.x, 0, CANVAS_UNITS);
+    next.cy = clamp(f.cy + p.y - t.start.y, 0, CANVAS_UNITS);
   } else if (t.mode === "scaleX" || t.mode === "scaleY") {
     const l = toLocal(c, angle, p), l0 = toLocal(c, angle, t.start);
     if (t.mode === "scaleX") {
@@ -1553,9 +1598,9 @@ function updateDrag(p) {
 // ============================================================
 canvas.addEventListener("pointerdown", (e) => {
   if (activePointer !== null || submitting) return;
-  const p = toMM(e);
+  const p = toCanvasUnits(e);
   const axis = mirrorEnabled ? mirrorAxisEndpoints() : null;
-  if (axis && distToSeg(p, axis.a, axis.b) <= pxToMM(18)) {
+  if (axis && distToSeg(p, axis.a, axis.b) <= pxToUnits(18)) {
     commitText();
     activePointer = e.pointerId;
     mirrorDragging = true;
@@ -1578,27 +1623,27 @@ canvas.addEventListener("pointerdown", (e) => {
 
 canvas.addEventListener("pointermove", (e) => {
   if (mirrorDragging && e.pointerId === activePointer) {
-    updateMirrorAngle(toMM(e));
+    updateMirrorAngle(toCanvasUnits(e));
     redraw();
     e.preventDefault();
     return;
   }
   if (e.pointerId !== activePointer) {
-    if (tool === "eraser" && e.pointerType === "mouse") { hover = toMM(e); redraw(); }
+    if (tool === "eraser" && e.pointerType === "mouse") { hover = toCanvasUnits(e); redraw(); }
     return;
   }
   if (tool === "select") {
-    const p = toMM(e);
+    const p = toCanvasUnits(e);
     if (marquee) {
       marquee.current = p;
-      if (dist(p, marquee.start) > MOVE_SLOP_MM) marquee.moved = true;
+      if (dist(p, marquee.start) > MOVE_SLOP_UNITS) marquee.moved = true;
     } else if (drag) {
       updateDrag(p);
     }
   } else {
     const events = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
     for (const ev of (events.length ? events : [e])) {
-      const p = toMM(ev);
+      const p = toCanvasUnits(ev);
       if (tool === "pencil" && currentStroke) {
         if (dist(p, currentStroke.p[currentStroke.p.length - 1]) >= MIN_POINT_SPACING) currentStroke.p.push(p);
       } else if (tool === "eraser") {
@@ -1621,7 +1666,7 @@ canvas.addEventListener("pointermove", (e) => {
 function finishShape() {
   const { a, b } = shapeDrag;
   shapeDrag = null;
-  if (dist(a, b) < 3) return;
+  if (dist(a, b) < 10) return;
   const gid = nextGroup++, key = tool === "line" ? "line" : shapeKey;
   const frame = { cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2, w: Math.max(Math.abs(b.x - a.x), 0.1), h: Math.max(Math.abs(b.y - a.y), 0.1), angle: 0, shapeKey: key };
   const items = buildShape(key, a, b).map((s) => ({ ...s, gid, frame: { ...frame } }));
@@ -1656,7 +1701,7 @@ function endPointer(e) {
     const m = marquee;
     marquee = null;
     if (m.moved) {
-      const ids = groupsWithinRect(m.start, toMM(e));
+      const ids = groupsWithinRect(m.start, toCanvasUnits(e));
       setSelection(ids, ids.length === 1 ? groupFrame(ids[0]) : boundsFrame(ids));
     }
   } else if (tool === "select" && drag) {
@@ -1679,7 +1724,7 @@ canvas.addEventListener("pointerleave", () => {
 // ============================================================
 canvas.addEventListener("click", (e) => {
   if (tool !== "text" || submitting) return;
-  const p = toMM(e);
+  const p = toCanvasUnits(e);
   const hitId = groupAt(p);
   const text = textAt(p) || strokes.find((s) => s.gid === hitId && (s.kind === "text" || s.kind === "textmirror"));
   if (!text) {
@@ -1772,7 +1817,7 @@ function cancelText() {
 textInput.addEventListener("input", () => {
   if (!draft) return;
   let v = cleanText(textInput.value, draft.font);
-  if (layoutText(draft.font, v).w * (draft.size / 100) * draft.sx > BED_MM) v = draft.text;   // wider than the bed
+  if (layoutText(draft.font, v).w * (draft.size / 100) * draft.sx > CANVAS_UNITS) v = draft.text;   // wider than the canvas
   textInput.value = v;
   draft.text = v;
   placeDraft(draft);
@@ -1966,36 +2011,75 @@ function toast(msg, kind) {
   toastTimer = setTimeout(() => toastEl.classList.remove("show"), kind === "err" ? 4500 : 3000);
 }
 
-// The design as an SVG on an EXPORT_UNITS x EXPORT_UNITS grid. Everything past the edge of the bed is cut off.
-function buildSVG() {
-  const k = EXPORT_UNITS / BED_MM;
-  const num = (n) => String(Math.round(n * k * 10) / 10);
-  const lines = [];
+// Apply the selected placement to a normalized inscribed circle before export.
+function buildSVG(placement) {
+  const paths = [];
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const s of strokes) {
     for (const stroke of renderPaths(s)) {
       for (const run of clipToBed(stroke.p)) {
-        const pts = simplify(run, 0.05);
-        if (pts.length < 2) continue;
-        lines.push('  <polyline points="' + pts.map((p) => num(p.x) + "," + num(p.y)).join(" ") + '" fill="none" stroke="' +
-          stroke.c + '" stroke-width="' + num(STROKE_WIDTH_MM) + '" stroke-linecap="round" stroke-linejoin="round"/>');
+        if (run.length < 2) continue;
+        paths.push({ points: run, color: stroke.c });
+        for (const p of run) {
+          minX = Math.min(minX, p.x); minY = Math.min(minY, p.y);
+          maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y);
+        }
       }
     }
   }
+  if (!paths.length) return null;
+
+  const center = CANVAS_UNITS / 2;
+  let anchor = { x: center, y: center };
+  if (placement === "artwork_center") {
+    anchor = {
+      x: (minX + maxX) / 2,
+      y: (minY + maxY) / 2,
+    };
+  }
+  let farthest = 0;
+  for (const path of paths) for (const p of path.points) {
+    farthest = Math.max(farthest, Math.hypot(p.x - anchor.x, p.y - anchor.y));
+  }
+  const scale = farthest > 0 ? center / farthest : 1;
+  const num = (n) => String(Math.round(n * 100) / 100);
+  const lines = [];
+  for (const path of paths) {
+    const normalized = path.points.map((p) => ({
+      x: center + (p.x - anchor.x) * scale,
+      y: center + (p.y - anchor.y) * scale,
+    }));
+    const pts = simplify(normalized, 0.1667);
+    if (pts.length < 2) continue;
+    lines.push('  <polyline points="' + pts.map((p) => num(p.x) + "," + num(p.y)).join(" ") + '" fill="none" stroke="' +
+      path.color + '" stroke-width="' + num(SVG_STROKE_WIDTH) + '" stroke-linecap="round" stroke-linejoin="round"/>');
+  }
   if (!lines.length) return null;
-  return '<svg xmlns="http://www.w3.org/2000/svg" width="' + NOMINAL_SIZE_MM + 'mm" height="' + NOMINAL_SIZE_MM +
-    'mm" viewBox="0 0 ' + EXPORT_UNITS + " " + EXPORT_UNITS + '">\n' + lines.join("\n") + "\n</svg>";
+  return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + CANVAS_UNITS + " " + CANVAS_UNITS +
+    '" data-placement="' + placement + '">\n' + lines.join("\n") + "\n</svg>";
 }
 
-submitBtn.addEventListener("click", async () => {
+submitBtn.addEventListener("click", () => {
   if (submitting) return;
   commitText();
-  const svg = buildSVG();
-  if (!svg) return;
+  if (!strokes.length) return;
+  submitForm.reset();
+  submitDialog.showModal();
+});
+
+$("cancelSubmit").addEventListener("click", () => submitDialog.close());
+submitForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (submitting) return;
+  const placement = submitForm.elements.placement.value;
+  const svg = buildSVG(placement);
+  if (!svg) { submitDialog.close(); return; }
   if (svg.length > MAX_SVG_CHARS) {
     toast("Too detailed to send. Undo a few strokes and try again.", "err");
     return;
   }
 
+  submitDialog.close();
   submitting = true;
   submitBtn.textContent = "Sending...";
   updateButtons();
